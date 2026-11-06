@@ -1,0 +1,32 @@
+{
+  "name": "খেজুরবাগ ডিজিটাল স্কুল টু",
+  "short_name": "Khejur Bag School",
+  "description": "খেজুরবাগ ডিজিটাল স্কুল টু — নোটিশ, হাজিরা, রেজাল্ট ও ফি, গার্জিয়ানদের জন্য একটাই অ্যাপ।",
+  "lang": "bn",
+  "start_url": "/khejur-bag-school/",
+  "scope": "/khejur-bag-school/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1e3a8a",
+  "theme_color": "#1e3a8a",
+  "icons": [
+    {
+      "src": "/khejur-bag-school/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/khejur-bag-school/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/khejur-bag-school/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
