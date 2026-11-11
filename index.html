@@ -2033,7 +2033,7 @@ function shareEntryLink(){
    versionCode/versionName here and the notice appears for everyone
    automatically on the next web deploy. */
 var APK_UPDATE_SEEN_KEY = "school-apk-update-seen";
-var LATEST_APK = {versionCode: 5, versionName: "1.0.4", url: DEFAULT_APK_LINK};
+var LATEST_APK = {versionCode: 6, versionName: "1.0.5", url: DEFAULT_APK_LINK};
 function apkUpdateUnseen(){
   try{ return localStorage.getItem(APK_UPDATE_SEEN_KEY) !== LATEST_APK.versionName; }catch(e){ return true; }
 }
@@ -2079,10 +2079,10 @@ function readEntryParam(){
 function appPlatformLine(){
   var v = installedApkVersionCode();
   if(v !== null){
-    if(v === LATEST_APK.versionCode) return '<p class="dim small" style="margin:14px 0 0;text-align:center">📱 অ্যাপ সংস্করণ: v'+LATEST_APK.versionName+'</p>';
-    return '<p class="dim small" style="margin:14px 0 0;text-align:center">📱 অ্যাপ সংস্করণ কোড: '+bnNum(v)+'</p>';
+    if(v === LATEST_APK.versionCode) return '<p class="dim small" style="margin:14px 0 0;text-align:center">📱 অ্যাপ সংস্করণ: v'+LATEST_APK.versionName+' • ওয়েব: ছবি-ঠিক ১১ নভে</p>';
+    return '<p class="dim small" style="margin:14px 0 0;text-align:center">📱 অ্যাপ সংস্করণ কোড: '+bnNum(v)+' • ওয়েব: ছবি-ঠিক ১১ নভে</p>';
   }
-  return '<p class="dim small" style="margin:14px 0 0;text-align:center">🌐 ব্রাউজার দিয়ে খোলা হয়েছে — বন্ধ থাকলে অ্যালার্ম বাজবে না</p>';
+  return '<p class="dim small" style="margin:14px 0 0;text-align:center">🌐 ব্রাউজার দিয়ে খোলা হয়েছে — বন্ধ থাকলে অ্যালার্ম বাজবে না • ওয়েব: ছবি-ঠিক ১১ নভে</p>';
 }
 function markApkUpdateSeen(){
   try{ localStorage.setItem(APK_UPDATE_SEEN_KEY, LATEST_APK.versionName); }catch(e){}
@@ -7911,8 +7911,8 @@ function adminSettingsHtml(){
     + '<li><b>Firebase Auth + rules:</b> Play Store-এ পাবলিক করার আগে Firebase কনসোলে (১) Authentication → Sign-in method → Email/Password চালু করুন, (২) Realtime Database → Rules-এ firebase-rules.json-এর নিয়মগুলো বসান (প্রথমে Rules Playground-এ যাচাই করে নিন)। তারপর সার্ভার নিজেই লগইন যাচাই করবে।</li>'
     + '</ul></section>';
   html += '<section class="card"><h2 class="sec-title">'+icon("download")+' ব্যাকআপ (JSON এক্সপোর্ট)</h2>'
-    + '<p class="dim small">সব তথ্যের (নোটিশ, শিক্ষার্থী, শিক্ষক, হাজিরা, রেজাল্ট, ফি) একটা ব্যাকআপ ফাইল ডাউনলোড করে রাখুন — কিছু নষ্ট হলেও এটা দিয়ে ফিরিয়ে আনা যাবে। ব্যাকআপে ফোন নম্বরও থাকে, তাই ফাইলটা কারো সাথে শেয়ার করবেন না।</p>'
-    + '<div class="row-btns"><button type="button" class="btn" data-act="export-backup">'+icon("download","sm")+' ব্যাকআপ ডাউনলোড করুন</button></div></section>';
+    + '<p class="dim small">সব তথ্যের (নোটিশ, শিক্ষার্থী, শিক্ষক, হাজিরা, রেজাল্ট, ফি) একটা ব্যাকআপ ফাইল ডাউনলোড করে রাখুন — কিছু নষ্ট হলেও এটা দিয়ে ফিরিয়ে আনা যাবে। অ্যাপের ভেতর থেকে নিতে হলে <b>ব্যাকআপ কপি করুন</b> চাপ দিন — পুরো ব্যাকআপটা কপি হয়ে যাবে, নোটসে পেস্ট করে রাখুন। ব্যাকআপে ফোন নম্বরও থাকে, তাই এটা কারো সাথে শেয়ার করবেন না।</p>'
+    + '<div class="row-btns"><button type="button" class="btn gold" data-act="copy-backup">📋 ব্যাকআপ কপি করুন</button><button type="button" class="btn" data-act="export-backup">'+icon("download","sm")+' ব্যাকআপ ডাউনলোড করুন</button></div></section>';
   html += '<section class="card"><h2 class="sec-title">'+icon("refresh")+' লাইভ সিঙ্ক — Firebase সেটআপ</h2>'
     + '<div class="status-line" id="syncStatus" style="justify-content:flex-start;margin-bottom:10px">'+statusHtml()+"</div>"
     + '<p class="small" style="margin-top:0">একই লিংকে সব ফোনে একই তথ্য দেখাতে ফ্রি <b>Firebase Realtime Database</b> ব্যবহার করা হয়। একবার সেটআপ করলেই অ্যাডমিনের প্রতিটি আপডেট সাথে সাথে সব শিক্ষার্থীর ফোনে পৌঁছে যাবে।</p>'
@@ -8408,6 +8408,20 @@ document.addEventListener("click", function(e){
     render(); toast("যুক্তি বাতিল হয়েছে — এই নম্বর দিয়ে আর তথ্য দেখা যাবে না");
   }
   else if(act==="entry-privacy"){ ui.entryMode="privacy"; render(); window.scrollTo(0,0); }
+  else if(act==="copy-backup"){
+    /* Backup copy (Admin settings): Clipboard API first, textarea
+       fallback for WebViews without it — same pattern as the share-link
+       copy. The installed APK must never be forced through a blob:
+       download (its DownloadManager cannot fetch blob: URLs), so the
+       copy button is the safe way to take a backup out of the app —
+       and it works without a new APK. */
+    var btxt = JSON.stringify(D, null, 2);
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(btxt).then(function(){ toast("ব্যাকআপ কপি হয়েছে — নোটসে পেস্ট করে রাখুন"); }, function(){ if(!copyTextFallback(btxt, "ব্যাকআপ কপি হয়েছে — নোটসে পেস্ট করে রাখুন")) toast("কপি করা যায়নি — আবার চেষ্টা করুন"); });
+    } else if(!copyTextFallback(btxt, "ব্যাকআপ কপি হয়েছে — নোটসে পেস্ট করে রাখুন")){
+      toast("কপি করা যায়নি — আবার চেষ্টা করুন");
+    }
+  }
   else if(act==="export-backup"){
     try{
       var blob = new Blob([JSON.stringify(D, null, 2)], { type: "application/json" });
@@ -8602,7 +8616,7 @@ function ensurePhotoInput(){
   inp.type="file"; inp.accept="image/*"; inp.style.cssText="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;";
   inp.addEventListener("change", function(){
     var f=inp.files && inp.files[0];
-    if(f) handlePhotoFile(f);
+    if(f){ toast("ছবি পাওয়া গেছে — পড়া হচ্ছে…"); handlePhotoFile(f); }
     try{ inp.value=""; }catch(e){}
   });
   document.body.appendChild(inp);
@@ -8681,6 +8695,10 @@ document.addEventListener("click", function(e){
   pendingPhotoKind=b.getAttribute("data-photo-pick");
   if(pendingPhotoKind==="homework") stashHomeworkDraft();
   if(pendingPhotoKind==="resultfile") stashTeacherResultDraft();
+  /* An explicit "ছবি বেছে নিন" tap is a photo pick, never a card scan:
+     clear the ID-card scan flag so a pick made within 3 min of touching
+     the scan button can never be diverted to openIdCardRotateSheet. */
+  idcardScanAt=0;
   ensurePhotoInput();
   photoInput.click();
 });
