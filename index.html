@@ -6191,7 +6191,8 @@ function homeworkPhotosHtml(){
       }).join("") + '</div>';
   if(photos.length < HOMEWORK_PHOTOS_MAX){
     h += '<div class="row-btns"><button type="button" class="btn ghost small" style="margin:0" data-photo-camera="homework">📷 ছবি যোগ করুন</button>'
-      + '<button type="button" class="btn ghost small" style="margin:0" data-photo-pick="homework">🖼️ গ্যালারি থেকে</button></div>';
+      + '<span style="position:relative;display:inline-block"><button type="button" class="btn ghost small" style="margin:0" data-photo-pick="homework">🖼️ গ্যালারি থেকে</button>'
+      + '<input type="file" accept="image/*" class="photo-input-overlay" data-photo-kind="homework" style="position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;cursor:pointer" aria-label="গ্যালারি থেকে ছবি বেছে নিন" /></span></div>';
   } else {
     h += '<p class="dim small" style="margin:0">সর্বোচ্চ '+bnNum(HOMEWORK_PHOTOS_MAX)+'টি ছবি যোগ করা হয়েছে।</p>';
   }
@@ -6658,6 +6659,7 @@ function retryCameraStream(){
   startCameraStream();
 }
 function captureCameraPhoto(){
+  toast("ছবি তোলা হচ্ছে…");
   var v=document.getElementById("cameraVideo");
   if(!cameraStream || !v || !v.videoWidth){
     toast("ক্যামেরা এখনো চালু হচ্ছে — একটু অপেক্ষা করে আবার চাপুন");
@@ -6671,18 +6673,16 @@ function captureCameraPhoto(){
   if(!cx){ toast("ছবি তোলা যায়নি — আবার চেষ্টা করুন"); return; }
   cx.drawImage(v,0,0,cv.width,cv.height);
   var kind=pendingPhotoKind||"student";
+  /* Synchronous: toDataURL returns the JPEG right away. The old async
+     blob round-trip never called back on the user's phone
+     (WebGL-dead WebView), so a taken photo silently never arrived. */
+  var url="";
+  try{ url=cv.toDataURL("image/jpeg", 0.8); }catch(e){ url=""; }
+  if(!url || url.indexOf("data:image/")!==0){ toast("ছবি তোলা যায়নি — আবার চেষ্টা করুন"); return; }
   stopCameraStream();
   ui.sheet=null;
   render();
-  function done(blob){
-    if(!blob){ toast("ছবি তোলা যায়নি — আবার চেষ্টা করুন"); return; }
-    var f;
-    try{ f=new File([blob], "camera.jpg", { type:"image/jpeg" }); }
-    catch(e){ f=blob; try{ f.name="camera.jpg"; }catch(e2){} }
-    pendingPhotoKind=kind;
-    handlePhotoFile(f);
-  }
-  try{ cv.toBlob(done, "image/jpeg", 0.8); }catch(e){ toast("ছবি তোলা যায়নি — আবার চেষ্টা করুন"); }
+  applyPickedPhotoUrl(kind, url);
 }
 
 /* ---------------- কুইজ প্রতিযোগিতা (student panel) ----------------
@@ -6971,9 +6971,18 @@ function adminNoticesHtml(){
 }
 
 function photoPickHtml(kind, current){
+  /* The "ছবি বেছে নিন" button is a REAL file input the user taps DIRECTLY:
+     the transparent input covers ONLY this button (absolute inset-0,
+     opacity 0) inside a relative span, so the tap lands on the input
+     itself — NO programmatic .click() anywhere in this path (a
+     programmatic click opens nothing on the user's phone, WebGL-dead
+     WebView, APK v1.0.5). The 📷 ক্যামেরা button next to it is NOT
+     covered. A delegated "change" listener (below) handles
+     .photo-input-overlay picks. */
   return '<div class="photo-pick" data-photo-kind="'+kind+'">'
     + (safeImg(current) ? '<img src="'+safeImg(current)+'" alt="" />' : '<span class="avatar-fallback" style="width:64px;height:64px;border-radius:12px">'+icon("users")+'</span>')
-    + '<button type="button" class="btn ghost small" style="margin:0" data-photo-pick="'+kind+'">ছবি বেছে নিন</button>'
+    + '<span style="position:relative;display:inline-block"><button type="button" class="btn ghost small" style="margin:0" data-photo-pick="'+kind+'">ছবি বেছে নিন</button>'
+    + '<input type="file" accept="image/*" class="photo-input-overlay" data-photo-kind="'+kind+'" style="position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;cursor:pointer" aria-label="ছবি বেছে নিন" /></span>'
     + '<button type="button" class="btn ghost small" style="margin:0" data-photo-camera="'+kind+'">📷 ক্যামেরা</button></div>';
 }
 
@@ -7816,7 +7825,7 @@ function adminSettingsHtml(){
     + '<form data-form="settings">'
     + '<div class="photo-pick">'
     + '<img src="'+(safeImg(ui.pendingLogo || s.logoUrl) || SCHOOL_LOGO)+'" alt="" style="border-radius:999px" />'
-    + '<button type="button" class="btn ghost small" style="margin:0" data-photo-pick="logo">লোগো বদলান</button><button type="button" class="btn ghost small" style="margin:0" data-photo-camera="logo">📷 ক্যামেরা</button></div>'
+    + '<span style="position:relative;display:inline-block"><button type="button" class="btn ghost small" style="margin:0" data-photo-pick="logo">লোগো বদলান</button><input type="file" accept="image/*" class="photo-input-overlay" data-photo-kind="logo" style="position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;cursor:pointer" aria-label="লোগো বেছে নিন" /></span><button type="button" class="btn ghost small" style="margin:0" data-photo-camera="logo">📷 ক্যামেরা</button></div>'
     + '<label class="f"><span>স্কুলের নাম (বাংলা)</span><input type="text" name="nameBn" value="'+esc(s.nameBn)+'" / aria-label="স্কুলের নাম (বাংলা)" /></label>'
     + '<label class="f"><span>নাম (English)</span><input type="text" name="nameEn" value="'+esc(s.nameEn)+'" / aria-label="নাম (English)" /></label>'
     + '<label class="f"><span>স্লোগান / ট্যাগলাইন</span><input type="text" name="tagline" value="'+esc(s.tagline)+'" / aria-label="স্লোগান" /></label>'
@@ -8623,6 +8632,34 @@ function ensurePhotoInput(){
   photoInput=inp;
   return inp;
 }
+/* Shared success path for a picked photo — gallery pick AND camera
+   capture both end here: store the pending photo for the kind, update
+   the preview/thumbs, toast. (Lifted out of handlePhotoFile so the
+   synchronous camera capture can use the exact same path.) */
+function applyPickedPhotoUrl(kind, url){
+  if(kind==="student") ui.pendingStudentPhoto=url;
+  else if(kind==="teacher") ui.pendingTeacherPhoto=url;
+  else if(kind==="founder") ui.pendingFounderPhoto=url;
+  else if(kind==="logo") ui.pendingLogo=url;
+  else if(kind==="homework"){
+    if(!Array.isArray(ui.pendingHomeworkPhotos)) ui.pendingHomeworkPhotos=[];
+    if(ui.pendingHomeworkPhotos.length>=HOMEWORK_PHOTOS_MAX){ toast("একটি হোমওয়ার্কে সর্বোচ্চ "+bnNum(HOMEWORK_PHOTOS_MAX)+"টি ছবি দেওয়া যায়"); return; }
+    ui.pendingHomeworkPhotos.push(url);
+    updateHomeworkPhotoThumbs();
+    toast("ছবি যোগ হয়েছে — হোমওয়ার্ক দিলে ছবিটাও যাবে");
+    return;
+  }
+  else if(kind==="resultfile"){
+    if(!Array.isArray(ui.pendingResultFiles)) ui.pendingResultFiles=[];
+    if(ui.pendingResultFiles.length>=RESULT_FILES_MAX){ toast("একটি রেজাল্টে সর্বোচ্চ "+bnNum(RESULT_FILES_MAX)+"টি ফাইল দেওয়া যায়"); return; }
+    ui.pendingResultFiles.push({ name:"ছবি "+bnNum(ui.pendingResultFiles.length+1), type:"image/jpeg", data:url, sizeKB:Math.max(1, Math.round(url.length*3/4/1024)) });
+    updateResultFilesPreview();
+    toast("ছবি যোগ হয়েছে — রেজাল্ট দিলে ছবিটাও যাবে");
+    return;
+  }
+  updatePhotoPreview(kind, url);
+  toast("ছবি বেছে নেওয়া হয়েছে — নিচে সংরক্ষণ করুন");
+}
 function handlePhotoFile(file){
   var kind=pendingPhotoKind||"student";
   var name=String(file.name||"").toLowerCase();
@@ -8637,33 +8674,9 @@ function handlePhotoFile(file){
     fileToDataUrl(file, 2000).then(function(url){ openIdCardRotateSheet(url); }).catch(function(){ idcardSetStatus("❌ ছবি পড়া যায়নি — আবার চেষ্টা করুন"); toast("ছবি পড়া যায়নি — আবার চেষ্টা করুন"); });
     return;
   }
-  /* Success path, shared by the canvas route and the FileReader
-     fallback below: store the pending photo, update the preview. */
-  function usePhotoUrl(url){
-    if(kind==="student") ui.pendingStudentPhoto=url;
-    else if(kind==="teacher") ui.pendingTeacherPhoto=url;
-    else if(kind==="founder") ui.pendingFounderPhoto=url;
-    else if(kind==="logo") ui.pendingLogo=url;
-    else if(kind==="homework"){
-      if(!Array.isArray(ui.pendingHomeworkPhotos)) ui.pendingHomeworkPhotos=[];
-      if(ui.pendingHomeworkPhotos.length>=HOMEWORK_PHOTOS_MAX){ toast("একটি হোমওয়ার্কে সর্বোচ্চ "+bnNum(HOMEWORK_PHOTOS_MAX)+"টি ছবি দেওয়া যায়"); return; }
-      ui.pendingHomeworkPhotos.push(url);
-      updateHomeworkPhotoThumbs();
-      toast("ছবি যোগ হয়েছে — হোমওয়ার্ক দিলে ছবিটাও যাবে");
-      return;
-    }
-    else if(kind==="resultfile"){
-      if(!Array.isArray(ui.pendingResultFiles)) ui.pendingResultFiles=[];
-      if(ui.pendingResultFiles.length>=RESULT_FILES_MAX){ toast("একটি রেজাল্টে সর্বোচ্চ "+bnNum(RESULT_FILES_MAX)+"টি ফাইল দেওয়া যায়"); return; }
-      ui.pendingResultFiles.push({ name:"ছবি "+bnNum(ui.pendingResultFiles.length+1), type:"image/jpeg", data:url, sizeKB:Math.max(1, Math.round(url.length*3/4/1024)) });
-      updateResultFilesPreview();
-      toast("ছবি যোগ হয়েছে — রেজাল্ট দিলে ছবিটাও যাবে");
-      return;
-    }
-    updatePhotoPreview(kind, url);
-    toast("ছবি বেছে নেওয়া হয়েছে — নিচে সংরক্ষণ করুন");
-  }
-  fileToDataUrl(file).then(usePhotoUrl).catch(function(){
+  /* Success path (canvas route + FileReader fallback below) goes through
+     the shared applyPickedPhotoUrl(kind, url). */
+  fileToDataUrl(file).then(function(url){ applyPickedPhotoUrl(kind, url); }).catch(function(){
     /* Canvas decode failed (unusual format, huge image, canvas OOM):
        fall back to the raw file as a data URL — no 800px compression,
        but the photo still gets in. */
@@ -8671,7 +8684,7 @@ function handlePhotoFile(file){
       var rd=new FileReader();
       rd.onload=function(){
         var u=String(rd.result||"");
-        if(u.indexOf("data:image/")===0) usePhotoUrl(u);
+        if(u.indexOf("data:image/")===0) applyPickedPhotoUrl(kind, u);
         else toast("ছবি পড়া যায়নি — অন্য ছবি চেষ্টা করুন");
       };
       rd.onerror=function(){ toast("ছবি পড়া যায়নি — অন্য ছবি চেষ্টা করুন"); };
@@ -8682,25 +8695,45 @@ function handlePhotoFile(file){
 function updatePhotoPreview(kind, url){
   var btn=document.querySelector('[data-photo-pick="'+kind+'"]');
   if(!btn) return;
-  var box=btn.parentElement;
+  /* The pick button is now wrapped in a relative span (the direct-tap
+     overlay input lives there), so the preview box is the .photo-pick
+     container — NOT the button's parent. */
+  var box=btn.closest ? btn.closest(".photo-pick") : null;
+  if(!box) box=btn.parentElement;
   if(!box) return;
   var img=box.querySelector("img");
   if(img){ img.src=url; return; }
   var fb=box.querySelector(".avatar-fallback");
   if(fb){ var ni=document.createElement("img"); ni.src=url; ni.alt=""; fb.replaceWith(ni); }
 }
-document.addEventListener("click", function(e){
-  var b=e.target && e.target.closest ? e.target.closest("[data-photo-pick]") : null;
-  if(!b) return;
-  pendingPhotoKind=b.getAttribute("data-photo-pick");
-  if(pendingPhotoKind==="homework") stashHomeworkDraft();
-  if(pendingPhotoKind==="resultfile") stashTeacherResultDraft();
+/* Direct-tap photo pick: the user's tap lands ON the transparent
+   .photo-input-overlay input itself (it covers the "ছবি বেছে নিন"
+   button), so there is NO programmatic click anywhere in this
+   path — the old handler that triggered the shared hidden input
+   is gone. The change listener below does everything that handler did
+   (kind, draft stash, ID-card flag clear), exactly once, before
+   handlePhotoFile runs. */
+document.addEventListener("change", function(e){
+  var inp=e.target && e.target.closest ? e.target.closest(".photo-input-overlay") : null;
+  if(!inp) return;
+  var kind=inp.getAttribute("data-photo-kind")||"student";
+  var f=inp.files && inp.files[0];
+  if(!f){ try{ inp.value=""; }catch(err){} return; }
+  pendingPhotoKind=kind;
+  if(kind==="homework") stashHomeworkDraft();
+  if(kind==="resultfile") stashTeacherResultDraft();
   /* An explicit "ছবি বেছে নিন" tap is a photo pick, never a card scan:
      clear the ID-card scan flag so a pick made within 3 min of touching
      the scan button can never be diverted to openIdCardRotateSheet. */
   idcardScanAt=0;
-  ensurePhotoInput();
-  photoInput.click();
+  toast("ছবি পাওয়া গেছে — পড়া হচ্ছে…");
+  handlePhotoFile(f);
+  try{ inp.value=""; }catch(err){}
+});
+document.addEventListener("click", function(e){
+  var inp=e.target && e.target.closest ? e.target.closest(".photo-input-overlay") : null;
+  if(!inp) return;
+  toast("ছবি বেছে নেওয়া হচ্ছে…");
 });
 document.addEventListener("click", function(e){
   var b=e.target && e.target.closest ? e.target.closest("[data-photo-camera]") : null;
