@@ -487,7 +487,10 @@ function fireNoticeNotification(n){
     notif.onclick = function(){
       try{ window.focus(); }catch(e){}
       ui.tab = "home"; ui.studentDetailId = null;
-      render();
+      /* A system-notification tap can land while a photo pick is open
+         (the gallery is a separate activity) — hold instead of
+         rebuilding, or the pick's change event is swallowed. */
+      holdOrRender();
       try{ notif.close(); }catch(e){}
     };
   }catch(e){}
@@ -526,7 +529,9 @@ function requestNotifyPermission(){
         toast(registered || osReadyForPush
           ? "নোটিফিকেশন চালু হয়েছে — অ্যাপ বন্ধ বা ফোন লক থাকলেও জরুরি নোটিশের নোটিফিকেশন আসবে"
           : "নোটিফিকেশন চালু হয়েছে — অ্যাপ খোলা থাকলে জরুরি নোটিশ জানানো হবে");
-        render();
+        /* Async network resolution: the user may have opened a photo
+           pick while this was in flight — hold instead of rebuilding. */
+        holdOrRender();
       });
       try{
         var hello = new Notification((D && D.settings && D.settings.nameBn) || SCHOOL_NAME, {
@@ -889,6 +894,16 @@ var pointerDown = false;
    in clearPhotoPickOpen() below. */
 var photoPickOpen = false;
 var photoPickTimer = null;
+/* Delayed focus-release timer (see the focus listener): the flag is NOT
+   cleared the instant the user returns from the gallery — Blink delivers
+   the picked file's change event in the same return, and an immediate
+   clear would flush a held render and rebuild #app, destroying the
+   overlay input before the change lands. While this timer runs the hold
+   stays up, so the change lands on the live input first. */
+/* Delayed flush timer (see clearPhotoPickOpen): a held sync render must
+   never run in the same instant the hold drops. */
+var focusClearTimer = null;
+var flushTimer = null;
 var persistTimer = null;
 var saveTimer = null;
 var sessionPhone = "";
@@ -946,12 +961,16 @@ function stableSig(o){
    renders never come through here and always run immediately. */
 /* Clears the photo-pick hold (change handler, window focus on a cancelled
    pick, or the 30s safety timer) and flushes any sync render that was held
-   while the picker was open. */
+   while the picker was open. The flush is delayed 500 ms (never stacked):
+   a held render must never run in the same instant the hold drops — the
+   file-delivery change event may still be in flight when the flag clears. */
 function clearPhotoPickOpen(){
   if(!photoPickOpen && photoPickTimer === null) return;
   photoPickOpen = false;
   if(photoPickTimer !== null){ clearTimeout(photoPickTimer); photoPickTimer = null; }
-  flushSyncRender();
+  if(focusClearTimer !== null){ clearTimeout(focusClearTimer); focusClearTimer = null; }
+  if(flushTimer !== null) clearTimeout(flushTimer);
+  flushTimer = setTimeout(function(){ flushTimer = null; flushSyncRender(); }, 500);
 }
 function renderFromSync(){
   if(pointerDown || typingActive || photoPickOpen || ui.meetingView){ syncRenderPending = true; return; }
@@ -998,6 +1017,20 @@ function flushSyncRender(){
   });
   else render();
 }
+/* Direct render() from a path that can fire WITHOUT a user tap while a
+   photo pick is open (timers, fetch callbacks, notification taps, azan
+   state changes). Use this instead of a bare render() in those paths:
+   while a hold is up (mid-tap, typing, photo pick, live meeting) the
+   render is held exactly like renderFromSync() holds it — the pending
+   flag is set and the flush runs it once the hold clears. A plain
+   render() here would rebuild #app and destroy the overlay input the
+   native gallery is bound to, swallowing the pick's change event.
+   User-action renders (button taps, form submits, logins) never come
+   through here — they run immediately, as before. */
+function holdOrRender(){
+  if(pointerDown || typingActive || photoPickOpen || ui.meetingView){ syncRenderPending = true; return; }
+  render();
+}
 /* ---- Refresh button: spinner + timeout (see the "refresh" click
    handler) ---- */
 function startRefreshSpin(){
@@ -1042,7 +1075,9 @@ function finishRefresh(ok){
   renderStatus();
   if(ok) toast("সর্বশেষ তথ্য আনা হয়েছে");
   else toast("নেটওয়ার্ক ধীর — আবার চেষ্টা করুন");
-  render();
+  /* The 5s refresh-timeout can fire while a photo pick is open — hold
+     instead of rebuilding, or the pick's change event is swallowed. */
+  holdOrRender();
 }
 function publicData(src){
   var pub = JSON.parse(JSON.stringify(src));
@@ -1552,7 +1587,9 @@ function flagAuthRelogin(){
   if(ui.needsAuthRelogin) return;
   ui.needsAuthRelogin = true;
   toast("নিরাপত্তা আপডেট হয়েছে — সার্ভার এখন লগইন চায়, তাই আবার লগইন করুন");
-  render();
+  /* A 403 callback can fire any time, including mid-pick — hold instead
+     of rebuilding, or the pick's change event is swallowed. */
+  holdOrRender();
 }
 function ensureAdminUidRecorded(){
   var uid = authUid();
@@ -1786,7 +1823,8 @@ function mergeRootGuardians(){
     if(!val) return;
     var changed = false;
     guardiansToArray(val).forEach(function(g){ if(!guardianByPhone(g.phone)){ D.guardians.push(g); changed = true; } });
-    if(changed){ persistLocalSoon(); render(); }
+    /* One-shot fetch at admin load — it can resolve late, mid-pick. */
+    if(changed){ persistLocalSoon(); holdOrRender(); }
   };
   if(restMode && fbDbUrl){ restGet("guardians").then(merge).catch(function(){}); return; }
   if(fbRoot){ fbRoot.child("guardians").once("value").then(function(snap){ merge(snap.val()); }).catch(function(){}); return; }
@@ -1885,7 +1923,8 @@ function mergeRootTeacherAccounts(){
     if(!val) return;
     var changed = false;
     teacherAccountsToArray(val).forEach(function(a){ if(!teacherAccountByPhone(a.phone)){ D.teacherAccounts.push(a); changed = true; } });
-    if(changed){ persistLocalSoon(); render(); }
+    /* One-shot fetch at admin load — it can resolve late, mid-pick. */
+    if(changed){ persistLocalSoon(); holdOrRender(); }
   };
   if(restMode && fbDbUrl){ restGet("teacherAccounts").then(merge).catch(function(){}); return; }
   if(fbRoot){ fbRoot.child("teacherAccounts").once("value").then(function(snap){ merge(snap.val()); }).catch(function(){}); return; }
@@ -1935,7 +1974,9 @@ function fetchMyChildIds(cb){
       ui.guardianIdsLoading = false;
       try{ localStorage.setItem(GUARDIAN_CHILDREN_KEY, JSON.stringify(ui.myChildIds)); }catch(e){}
       if(cb) cb();
-      render();
+      /* Fetch callback — can resolve mid-pick (incl. the 10-min staleness
+         re-fetch). Hold instead of rebuilding. */
+      holdOrRender();
     };
     if(restMode && fbDbUrl){ restGet("guardianChildrenByUid/" + fbAuthUser.uid).then(function(v){ uidDone(idsFromGuardianChildren(v)); }).catch(function(){ uidDone([]); }); return; }
     if(fbRoot){
@@ -1951,7 +1992,9 @@ function fetchMyChildIds(cb){
     ui.guardianIdsLoading = false;
     try{ localStorage.setItem(GUARDIAN_CHILDREN_KEY, JSON.stringify(ui.myChildIds)); }catch(e){}
     if(cb) cb();
-    render();
+    /* Fetch callback — can resolve mid-pick (incl. the 10-min staleness
+       re-fetch). Hold instead of rebuilding. */
+    holdOrRender();
   };
   if(!fbRoot && !restMode && !fbDbUrl){
     done(D.students.filter(function(s){ return studentHasGuardianPhone(s, guardianPhone); }).map(function(s){ return s.id; }));
@@ -2361,7 +2404,11 @@ function azanRefreshStopBtn(){
   try{ playing = azanAnyPlaying(); }catch(e){ playing = false; }
   if(playing !== lastAzanPlayingState){
     lastAzanPlayingState = playing;
-    try{ render(); }catch(e){}
+    /* The 25s azan timer can fire while a photo pick is open (a prayer
+       time landing mid-pick) — hold instead of rebuilding, or the pick's
+       change event is swallowed. The playing state above is already
+       updated, so nothing is lost by holding. */
+    try{ holdOrRender(); }catch(e){}
   }
 }
 /* Play the real azan recording. No speech-synthesis fallback: an
@@ -8807,15 +8854,29 @@ document.addEventListener("click", function(e){
   /* The native picker is about to open: hold sync renders until the pick
      returns, or the rebuild would destroy this input and swallow the
      change event. Safety timer clears the hold even if the picker never
-     answers (30 s); window focus below covers a cancelled pick. */
+     answers (30 s); window focus below covers a cancelled pick. A new
+     tap cancels any pending focus-release from returning earlier — this
+     pick is live now, so the hold must stay up. */
   photoPickOpen = true;
+  if(focusClearTimer !== null){ clearTimeout(focusClearTimer); focusClearTimer = null; }
   if(photoPickTimer !== null) clearTimeout(photoPickTimer);
   photoPickTimer = setTimeout(clearPhotoPickOpen, 30000);
   toast("ছবি বেছে নেওয়া হচ্ছে…");
 });
 /* The user came back from the picker without picking (cancelled): release
-   the render hold so any held sync render runs. */
-window.addEventListener("focus", function(){ if(photoPickOpen) clearPhotoPickOpen(); });
+   the render hold so any held sync render runs. Delayed 1.5 s — Blink
+   delivers the picked file's change event in the same return, and
+   clearing immediately would flush a held render and rebuild #app,
+   destroying the overlay input before the change lands (the "gallery
+   opens, photo picked, nothing in the form" bug — the native side was
+   proven correct: req=1001 res=-1 data=true uri=true cb=true). While
+   the 1.5 s runs the hold stays up, so the change lands on the live
+   input first. A cancelled/expired pick just clears 1.5 s late. */
+window.addEventListener("focus", function(){
+  if(!photoPickOpen) return;
+  if(focusClearTimer !== null) clearTimeout(focusClearTimer);
+  focusClearTimer = setTimeout(function(){ focusClearTimer = null; clearPhotoPickOpen(); }, 1500);
+});
 document.addEventListener("click", function(e){
   var b=e.target && e.target.closest ? e.target.closest("[data-photo-camera]") : null;
   if(!b) return;
