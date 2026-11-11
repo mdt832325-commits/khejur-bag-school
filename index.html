@@ -2064,7 +2064,7 @@ function shareEntryLink(){
    versionCode/versionName here and the notice appears for everyone
    automatically on the next web deploy. */
 var APK_UPDATE_SEEN_KEY = "school-apk-update-seen";
-var LATEST_APK = {versionCode: 7, versionName: "1.0.6", url: DEFAULT_APK_LINK};
+var LATEST_APK = {versionCode: 8, versionName: "1.0.7", url: DEFAULT_APK_LINK};
 function apkUpdateUnseen(){
   try{ return localStorage.getItem(APK_UPDATE_SEEN_KEY) !== LATEST_APK.versionName; }catch(e){ return true; }
 }
