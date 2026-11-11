@@ -5090,7 +5090,7 @@ var idcardInput=null;
 function ensureIdCardInput(){
   if(idcardInput) return idcardInput;
   var inp=document.createElement("input");
-  inp.type="file"; inp.accept="image/*"; inp.style.display="none";
+  inp.type="file"; inp.accept="image/*"; inp.style.cssText="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;";
   inp.addEventListener("change", function(){
     var f=inp.files && inp.files[0];
     if(f) handleIdCardFile(f);
@@ -7512,7 +7512,7 @@ function ensureResultAttachInput(){
   var inp=document.createElement("input");
   inp.type="file";
   inp.accept="image/*,.pdf,application/pdf";
-  inp.style.display="none";
+  inp.style.cssText="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;";
   inp.addEventListener("change", function(){
     var f=inp.files && inp.files[0];
     if(f) handleResultAttachFile(f);
@@ -8591,12 +8591,15 @@ function fileToDataUrl(file, maxW){
    its typed values are never rebuilt.
    NOTE for the APK: a plain Android WebView also needs a WebChromeClient
    with onShowFileChooser, or tapping any file input does nothing at all.
-   That lives in the APK's MainActivity.java, not in this HTML file. */
+   That lives in the APK's MainActivity.java, not in this HTML file.
+   The input is positioned off-screen (left:-9999px), NOT display:none —
+   a display:none input cannot be opened by a programmatic .click() in
+   some Android WebViews, so the picker silently did nothing. */
 var photoInput=null, pendingPhotoKind="";
 function ensurePhotoInput(){
   if(photoInput) return photoInput;
   var inp=document.createElement("input");
-  inp.type="file"; inp.accept="image/*"; inp.style.display="none";
+  inp.type="file"; inp.accept="image/*"; inp.style.cssText="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;";
   inp.addEventListener("change", function(){
     var f=inp.files && inp.files[0];
     if(f) handlePhotoFile(f);
@@ -8620,7 +8623,9 @@ function handlePhotoFile(file){
     fileToDataUrl(file, 2000).then(function(url){ openIdCardRotateSheet(url); }).catch(function(){ idcardSetStatus("❌ ছবি পড়া যায়নি — আবার চেষ্টা করুন"); toast("ছবি পড়া যায়নি — আবার চেষ্টা করুন"); });
     return;
   }
-  fileToDataUrl(file).then(function(url){
+  /* Success path, shared by the canvas route and the FileReader
+     fallback below: store the pending photo, update the preview. */
+  function usePhotoUrl(url){
     if(kind==="student") ui.pendingStudentPhoto=url;
     else if(kind==="teacher") ui.pendingTeacherPhoto=url;
     else if(kind==="founder") ui.pendingFounderPhoto=url;
@@ -8643,7 +8648,22 @@ function handlePhotoFile(file){
     }
     updatePhotoPreview(kind, url);
     toast("ছবি বেছে নেওয়া হয়েছে — নিচে সংরক্ষণ করুন");
-  }).catch(function(){ toast("ছবি পড়া যায়নি — অন্য ছবি চেষ্টা করুন"); });
+  }
+  fileToDataUrl(file).then(usePhotoUrl).catch(function(){
+    /* Canvas decode failed (unusual format, huge image, canvas OOM):
+       fall back to the raw file as a data URL — no 800px compression,
+       but the photo still gets in. */
+    try{
+      var rd=new FileReader();
+      rd.onload=function(){
+        var u=String(rd.result||"");
+        if(u.indexOf("data:image/")===0) usePhotoUrl(u);
+        else toast("ছবি পড়া যায়নি — অন্য ছবি চেষ্টা করুন");
+      };
+      rd.onerror=function(){ toast("ছবি পড়া যায়নি — অন্য ছবি চেষ্টা করুন"); };
+      rd.readAsDataURL(file);
+    }catch(e){ toast("ছবি পড়া যায়নি — অন্য ছবি চেষ্টা করুন"); }
+  });
 }
 function updatePhotoPreview(kind, url){
   var btn=document.querySelector('[data-photo-pick="'+kind+'"]');
