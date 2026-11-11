@@ -965,7 +965,15 @@ function renderFromSync(){
   if(now - lastSyncRenderAt < 500){
     if(!syncRenderTimer){
       syncRenderTimer = setTimeout(function(){
-        syncRenderTimer = null; lastSyncRenderAt = Date.now(); render();
+        syncRenderTimer = null;
+        /* Re-check the hold inside the deferred callback: a tap, a text
+           field, a photo pick or a live meeting may have started after
+           the timer was set — rendering now would destroy the element
+           the user is interacting with (e.g. the file input the native
+           gallery is bound to). Stay pending; the flush runs it once
+           the hold clears. */
+        if(pointerDown || typingActive || photoPickOpen || ui.meetingView){ syncRenderPending = true; return; }
+        lastSyncRenderAt = Date.now(); render();
       }, 500 - (now - lastSyncRenderAt));
     }
     return;
@@ -982,7 +990,12 @@ function flushSyncRender(){
   if(pointerDown || typingActive || photoPickOpen || ui.meetingView) return;
   syncRenderPending = false;
   lastSyncRenderAt = Date.now();
-  if(window.requestAnimationFrame) requestAnimationFrame(function(){ render(); });
+  if(window.requestAnimationFrame) requestAnimationFrame(function(){
+    /* Same re-check as the timer callback above: a hold may have
+       started between flushSyncRender() and this frame. */
+    if(pointerDown || typingActive || photoPickOpen || ui.meetingView){ syncRenderPending = true; return; }
+    render();
+  });
   else render();
 }
 /* ---- Refresh button: spinner + timeout (see the "refresh" click
@@ -7989,6 +8002,25 @@ function afterRender(){
       else box.innerHTML = '<p class="dim small">লিংকটা অনেক লম্বা, QR বানানো যায়নি।</p>';
     }
   }
+  /* Photo picks: bind a DIRECT change listener to every
+     .photo-input-overlay input. A delegated document listener can never
+     fire for an input that a sync render detached from the document
+     while the native gallery was open — the pick would return to a
+     detached element and be lost silently (no toast, no photo). A direct
+     listener fires on the element itself even when detached, so the pick
+     still reaches the app. Renders re-create the inputs, so bind only
+     ones not bound yet (marker property). */
+  var overlays = document.querySelectorAll(".photo-input-overlay");
+  for(var oi = 0; oi < overlays.length; oi++){
+    (function(op){
+      if(op._photoDirectBound) return;
+      op._photoDirectBound = true;
+      op.addEventListener("change", function(ev){
+        if(ev && ev.stopPropagation) ev.stopPropagation();
+        handlePhotoOverlayPick(op);
+      });
+    })(overlays[oi]);
+  }
 }
 
 /* ================================================================
@@ -8741,9 +8773,10 @@ function updatePhotoPreview(kind, url){
    is gone. The change listener below does everything that handler did
    (kind, draft stash, ID-card flag clear), exactly once, before
    handlePhotoFile runs. */
-document.addEventListener("change", function(e){
-  var inp=e.target && e.target.closest ? e.target.closest(".photo-input-overlay") : null;
-  if(!inp) return;
+/* Shared pick handling for one .photo-input-overlay input. Used by BOTH
+   the direct listener bound in afterRender() and the delegated document
+   fallback below, so the behaviour is identical whichever path fires. */
+function handlePhotoOverlayPick(inp){
   var kind=inp.getAttribute("data-photo-kind")||"student";
   var f=inp.files && inp.files[0];
   if(!f){ try{ inp.value=""; }catch(err){} clearPhotoPickOpen(); return; }
@@ -8758,6 +8791,15 @@ document.addEventListener("change", function(e){
   handlePhotoFile(f);
   try{ inp.value=""; }catch(err){}
   clearPhotoPickOpen();
+}
+/* Delegated fallback: catches an overlay input that somehow never got
+   its direct listener (see afterRender). Inputs already bound are
+   skipped — their direct listener handles the pick and stops
+   propagation, so a pick is never processed twice. */
+document.addEventListener("change", function(e){
+  var inp=e.target && e.target.closest ? e.target.closest(".photo-input-overlay") : null;
+  if(!inp || inp._photoDirectBound) return;
+  handlePhotoOverlayPick(inp);
 });
 document.addEventListener("click", function(e){
   var inp=e.target && e.target.closest ? e.target.closest(".photo-input-overlay") : null;
