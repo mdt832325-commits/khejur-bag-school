@@ -885,54 +885,13 @@ var lastSyncRenderAt = 0;
 var syncRenderTimer = null;
 var syncRenderPending = false;
 var pointerDown = false;
-/* Photo pick in progress: the native gallery/camera picker is open. While
-   this is true, sync renders are HELD — rebuilding #app would destroy the
-   overlay file input the picker is bound to, and the pick would return to
-   a detached element so the change event never fires (gallery opens,
-   photo picked, nothing in the form). Cleared by the pick's change
-   handler, by window focus (pick cancelled), or by the 30s safety timer
-   in clearPhotoPickOpen() below. */
+/* Photo pick (render hold): RETAINED ONLY as a flag the shared render
+   machinery checks (renderFromSync / flushSyncRender / holdOrRender).
+   It is never set true any more — the v1.0.12 pull model has no
+   picker-open hold, because a sync render can no longer destroy a
+   pick: the native side stores the photo and the page pulls it (see
+   pullPendingPhoto below). */
 var photoPickOpen = false;
-var photoPickTimer = null;
-/* Delayed focus-release timer (see the focus listener): the flag is NOT
-   cleared the instant the user returns from the gallery — Blink delivers
-   the picked file's change event in the same return, and an immediate
-   clear would flush a held render and rebuild #app, destroying the
-   overlay input before the change lands. While this timer runs the hold
-   stays up, so the change lands on the live input first. */
-/* Delayed flush timer (see clearPhotoPickOpen): a held sync render must
-   never run in the same instant the hold drops. */
-var focusClearTimer = null;
-var flushTimer = null;
-/* Photo-pick poller fallback (see startPhotoPoll/stopPhotoPoll below):
-   the native side was proven to deliver a valid Uri (diagnostic toast
-   req=1001 res=-1 data=true uri=true cb=true) yet on this phone the
-   change event sometimes never reaches the page — so while a pick is
-   open we poll the tapped input (and every live overlay input) for a
-   picked file every 500 ms instead of trusting the change event alone.
-   The change listeners stay the fast primary path; the poller only
-   catches a lost change event. photoPickEl is the element tapped;
-   photoPollTimer is the interval id (null when not polling). */
-var photoPickEl = null;
-var photoPollTimer = null;
-/* Kind recorded on the overlay tap (data-photo-kind: student / teacher /
-   founder) so a native-delivered photo (see __nativePhotoData) knows
-   which form it belongs to even if the change event never fired. */
-var photoPickKind = "student";
-/* Native-bridge dedup: seq of the tap whose pick was already applied
-   (by the change event, the poller, or the bridge itself) — incremented
-   on every overlay tap; nativePhotoLast is the last delivered data-URL
-   key, so one pick is never applied twice. */
-var photoPickSeq = 0;
-var photoPickHandledSeq = -1;
-var nativePhotoLast = {key: "", at: 0};
-/* Chunked native-bridge delivery (APK v1.0.9): the native side sends the
-   base64 payload in ~16 KB pieces — v1.0.8's single-shot evaluateJavascript
-   with a ~130-270 KB data-URL string silently dropped on this phone. The
-   collector is index-based, so out-of-order arrival still reassembles. */
-var nativePhotoChunks = null;
-var nativePhotoTotal = 0;
-var nativePhotoReceived = 0;
 var persistTimer = null;
 var saveTimer = null;
 var sessionPhone = "";
@@ -988,58 +947,6 @@ function stableSig(o){
    touchstart and click destroys the tapped element and swallows the
    tap — the "tap several times to change tab" bug. User-initiated
    renders never come through here and always run immediately. */
-/* Photo-pick POLLER fallback — do NOT depend on the change event alone.
-   On this phone the native side delivers a valid Uri but the change
-   event sometimes never reaches the page (gallery opens, photo picked,
-   nothing in the form, even after the focus-delay fix). So while a pick
-   is open we check every 500 ms: (a) the tapped input itself — Blink
-   may still deliver the value to it even if a render detached it;
-   (b) every live .photo-input-overlay in the document — a re-render
-   may have replaced the tapped input. A file found anywhere is
-   processed exactly as the change handlers do (same toast, same decode,
-   same flag clear). The poller stops the moment the pick ends and
-   never runs while no pick is open, so it cannot touch the camera path
-   or the ID-card scan flow — it only ever watches overlay file inputs
-   while photoPickOpen is true. */
-function pollPhotoPick(){
-  if(!photoPickOpen) return;
-  var cands = [];
-  if(photoPickEl) cands.push(photoPickEl);
-  var live = document.querySelectorAll(".photo-input-overlay");
-  for(var i = 0; i < live.length; i++) cands.push(live[i]);
-  for(var j = 0; j < cands.length; j++){
-    var inp = cands[j];
-    if(!inp || inp._photoHandled) continue;
-    var f = inp.files && inp.files[0];
-    if(f){ handlePhotoOverlayPick(inp); return; }
-  }
-}
-function startPhotoPoll(inp){
-  stopPhotoPoll();
-  photoPickEl = inp || null;
-  photoPollTimer = setInterval(function(){
-    if(!photoPickOpen){ stopPhotoPoll(); return; }
-    pollPhotoPick();
-  }, 500);
-}
-function stopPhotoPoll(){
-  if(photoPollTimer !== null){ clearInterval(photoPollTimer); photoPollTimer = null; }
-  photoPickEl = null;
-}
-/* Clears the photo-pick hold (change handler, window focus on a cancelled
-   pick, or the 30s safety timer) and flushes any sync render that was held
-   while the picker was open. The flush is delayed 500 ms (never stacked):
-   a held render must never run in the same instant the hold drops — the
-   file-delivery change event may still be in flight when the flag clears. */
-function clearPhotoPickOpen(){
-  if(!photoPickOpen && photoPickTimer === null) return;
-  photoPickOpen = false;
-  stopPhotoPoll();
-  if(photoPickTimer !== null){ clearTimeout(photoPickTimer); photoPickTimer = null; }
-  if(focusClearTimer !== null){ clearTimeout(focusClearTimer); focusClearTimer = null; }
-  if(flushTimer !== null) clearTimeout(flushTimer);
-  flushTimer = setTimeout(function(){ flushTimer = null; flushSyncRender(); }, 500);
-}
 function renderFromSync(){
   if(pointerDown || typingActive || photoPickOpen || ui.meetingView){ syncRenderPending = true; return; }
   /* Throttle: at most one sync rebuild per 500 ms. A rebuild that arrives
@@ -2175,7 +2082,7 @@ function shareEntryLink(){
    versionCode/versionName here and the notice appears for everyone
    automatically on the next web deploy. */
 var APK_UPDATE_SEEN_KEY = "school-apk-update-seen";
-var LATEST_APK = {versionCode: 12, versionName: "1.0.11", url: DEFAULT_APK_LINK};
+var LATEST_APK = {versionCode: 13, versionName: "1.0.12", url: DEFAULT_APK_LINK};
 function apkUpdateUnseen(){
   try{ return localStorage.getItem(APK_UPDATE_SEEN_KEY) !== LATEST_APK.versionName; }catch(e){ return true; }
 }
@@ -7123,8 +7030,10 @@ function photoPickHtml(kind, current){
      itself — NO programmatic .click() anywhere in this path (a
      programmatic click opens nothing on the user's phone, WebGL-dead
      WebView, APK v1.0.5). The 📷 ক্যামেরা button next to it is NOT
-     covered. A delegated "change" listener (below) handles
-     .photo-input-overlay picks. */
+     covered. The tap opens the system chooser (via onShowFileChooser);
+     the picked photo arrives through the bridge store and the page
+     PULLS it (pullPendingPhoto) — the page never depends on this
+     input's change event, which never fires on this phone. */
   return '<div class="photo-pick" data-photo-kind="'+kind+'">'
     + (safeImg(current) ? '<img src="'+safeImg(current)+'" alt="" />' : '<span class="avatar-fallback" style="width:64px;height:64px;border-radius:12px">'+icon("users")+'</span>')
     + '<span style="position:relative;display:inline-block"><button type="button" class="btn ghost small" style="margin:0" data-photo-pick="'+kind+'">ছবি বেছে নিন</button>'
@@ -8117,25 +8026,22 @@ function afterRender(){
       else box.innerHTML = '<p class="dim small">লিংকটা অনেক লম্বা, QR বানানো যায়নি।</p>';
     }
   }
-  /* Photo picks: bind a DIRECT change listener to every
-     .photo-input-overlay input. A delegated document listener can never
-     fire for an input that a sync render detached from the document
-     while the native gallery was open — the pick would return to a
-     detached element and be lost silently (no toast, no photo). A direct
-     listener fires on the element itself even when detached, so the pick
-     still reaches the app. Renders re-create the inputs, so bind only
-     ones not bound yet (marker property). */
-  var overlays = document.querySelectorAll(".photo-input-overlay");
-  for(var oi = 0; oi < overlays.length; oi++){
-    (function(op){
-      if(op._photoDirectBound) return;
-      op._photoDirectBound = true;
-      op.addEventListener("change", function(ev){
-        if(ev && ev.stopPropagation) ev.stopPropagation();
-        handlePhotoOverlayPick(op);
-      });
-    })(overlays[oi]);
-  }
+  /* Gallery photo pull (APK v1.0.12): run the 500 ms pull ONLY while a
+     photo form is on screen; stop it the moment the form is gone, so
+     it never polls forever. When no photo form is on screen, also
+     clear any stale photo the native side stored for a non-profile
+     pick (the result-file attach input) — otherwise it would land on
+     the next profile form that opens. The interval itself is a no-op
+     in a plain browser (no window.Android) and while no photo has
+     been picked. */
+  try{
+    var hasPhotoForm = !!document.querySelector('[data-photo-pick="student"], [data-photo-pick="teacher"], [data-photo-pick="founder"], [data-photo-pick="homework"], [data-photo-pick="resultfile"], [data-photo-pick="logo"]');
+    if(hasPhotoForm) startPendingPhotoPull();
+    else {
+      stopPendingPhotoPull();
+      try{ var A2 = window.Android; if(A2 && typeof A2.clearPendingPhoto === "function") A2.clearPendingPhoto(); }catch(e){}
+    }
+  }catch(e){}
 }
 
 /* ================================================================
@@ -8881,178 +8787,84 @@ function updatePhotoPreview(kind, url){
   var fb=box.querySelector(".avatar-fallback");
   if(fb){ var ni=document.createElement("img"); ni.src=url; ni.alt=""; fb.replaceWith(ni); }
 }
-/* Direct-tap photo pick: the user's tap lands ON the transparent
-   .photo-input-overlay input itself (it covers the "ছবি বেছে নিন"
-   button), so there is NO programmatic click anywhere in this
-   path — the old handler that triggered the shared hidden input
-   is gone. The change listener below does everything that handler did
-   (kind, draft stash, ID-card flag clear), exactly once, before
-   handlePhotoFile runs. */
-/* Shared pick handling for one .photo-input-overlay input. Used by BOTH
-   the direct listener bound in afterRender() and the delegated document
-   fallback below, so the behaviour is identical whichever path fires. */
-function handlePhotoOverlayPick(inp){
-  var kind=inp.getAttribute("data-photo-kind")||"student";
-  var f=inp.files && inp.files[0];
-  if(!f){ try{ inp.value=""; }catch(err){} clearPhotoPickOpen(); return; }
-  /* This pick was already applied (native bridge, or another path for
-     the same tap) — never apply the same photo twice. */
-  if(photoPickHandledSeq === photoPickSeq){
-    try{ inp.value=""; }catch(err){}
-    clearPhotoPickOpen();
-    return;
-  }
-  /* Mark handled BEFORE any processing: the poller (and a late change
-     event) must never process the same file twice. Single-threaded, so
-     setting this first is the whole guard. */
-  inp._photoHandled = true;
-  photoPickHandledSeq = photoPickSeq;
-  pendingPhotoKind=kind;
-  if(kind==="homework") stashHomeworkDraft();
-  if(kind==="resultfile") stashTeacherResultDraft();
-  /* An explicit "ছবি বেছে নিন" tap is a photo pick, never a card scan:
-     clear the ID-card scan flag so a pick made within 3 min of touching
-     the scan button can never be diverted to openIdCardRotateSheet. */
-  idcardScanAt=0;
-  toast("ছবি পাওয়া গেছে — পড়া হচ্ছে…");
-  handlePhotoFile(f);
-  try{ inp.value=""; }catch(err){}
-  clearPhotoPickOpen();
+/* Gallery photo — PULL model (APK v1.0.12). The picked photo is stored
+   by the native side and the PAGE pulls it through the
+   JavascriptInterface (Android.getPendingPhoto). The old push chain
+   (overlay change event → 500 ms poller → native bridge →
+   evaluateJavascript chunks → the old bridge handler) failed on
+   this phone at every step: the change event never fired, the poller
+   found no file, and the pushed chunks never landed. The pull runs
+   only while a photo form is on screen — afterRender() starts/stops
+   it — and stops the moment a photo is applied or the form is left,
+   so it never polls forever. In a plain browser window.Android is
+   undefined and the interval is a harmless no-op; the camera path
+   still works there. pendingPhotoPullKind is the kind of the overlay
+   input last tapped (data-photo-kind); the form inference is the
+   fallback when the tap was never recorded. */
+var pendingPhotoPullTimer = null;
+var pendingPhotoPullKind = "";
+function photoPullKind(){
+  if(pendingPhotoPullKind) return pendingPhotoPullKind;
+  if(ui && ui.tab === "admin" && ui.adminSection === "teachers") return "teacher";
+  if(ui && ui.tab === "admin" && ui.adminSection === "settings") return "founder";
+  if(ui && ui.tab === "admin" && ui.adminSection === "students") return "student";
+  var b = document.querySelector('[data-photo-pick="teacher"], [data-photo-pick="student"], [data-photo-pick="founder"], [data-photo-pick="homework"], [data-photo-pick="resultfile"], [data-photo-pick="logo"]');
+  if(b) return b.getAttribute("data-photo-pick") || "student";
+  return "student";
 }
-/* Native-bridge photo delivery (APK v1.0.8): the native side reads the
-   picked file itself and calls this with a JPEG data URL, because on this
-   phone Blink drops the file-chooser value on the way back into the page
-   — the change event never fires and even the 500 ms poller finds no
-   file on any input (native proven: req=1001 res=-1 data=true uri=true
-   cb=true). Delivers into the SAME success path as a gallery pick
-   (applyPickedPhotoUrl), so the photo lands in the form exactly as if
-   the change event had fired. Never throws. */
-window.__nativePhotoData = function(dataUrl){
+function pullPendingPhoto(){
   try{
-    if(!dataUrl || typeof dataUrl !== "string" || dataUrl.indexOf("data:image/") !== 0) return;
-    /* Dedup (bridge path, v1.0.11): ONLY the data-URL-key 15 s dedup
-       remains here. The old seq guard (photoPickHandledSeq === seq)
-       silently dropped a bridge delivery whenever a previous pick on
-       the same page load had already advanced the handled seq and the
-       tap handler never ran for the current pick (so seq never
-       advanced) — exactly the state this phone is in, since its tap /
-       change path is broken. A bridge delivery happens once per pick
-       and the collector resets after completion, so a second
-       application of the same pick cannot occur. */
-    var key = dataUrl.slice(0, 120) + "|" + dataUrl.length;
-    var now = Date.now();
-    if(nativePhotoLast.key === key && (now - nativePhotoLast.at) < 15000) return;
-    nativePhotoLast = {key: key, at: now};
+    var A = window.Android;
+    if(!A || typeof A.getPendingPhoto !== "function") return;
+    var b64 = A.getPendingPhoto();
+    if(!b64 || typeof b64 !== "string") return;
+    /* Stale copy guard: a photo stored by a non-profile pick (the
+       result-file attach input) can sit in the bridge store until a
+       profile form opens later. A real pick is pulled within a second
+       of being stored (the interval ticks every 500 ms), so anything
+       older than 60 s is stale — discard it, never apply it. */
+    var at = 0;
+    try{ if(typeof A.getPendingPhotoAt === "function") at = A.getPendingPhotoAt() || 0; }catch(e){}
+    if(at > 0 && (Date.now() - at) > 60000){
+      try{ if(typeof A.clearPendingPhoto === "function") A.clearPendingPhoto(); }catch(e){}
+      return;
+    }
+    /* Resolve the kind BEFORE stopping clears the recorded tap kind. */
+    var kind = photoPullKind();
+    /* Clear FIRST so a slow apply can never re-apply the same photo. */
+    try{ if(typeof A.clearPendingPhoto === "function") A.clearPendingPhoto(); }catch(e){}
+    stopPendingPhotoPull();
+    var url = "data:image/jpeg;base64," + b64;
     /* ID-card scan active: route to the scan sheet exactly like the
-       file path does (handlePhotoFile's scan branch), never as a
+       file path does (handlePhotoFile's scan branch) — never as a
        profile photo. */
     if(typeof idcardScanActive === "function" && idcardScanActive()){
       idcardScanAt = 0;
-      openIdCardRotateSheet(dataUrl);
-      stopPhotoPoll();
+      openIdCardRotateSheet(url);
       return;
     }
-    /* Kind: the tap recorded it; otherwise infer from the open form. */
-    var kind = photoPickKind || "student";
-    if(!photoPickOpen){
-      if(ui && ui.tab === "admin" && ui.adminSection === "teachers") kind = "teacher";
-      else if(ui && ui.tab === "admin" && ui.adminSection === "settings") kind = "founder";
-      else if(ui && ui.tab === "admin" && ui.adminSection === "students") kind = "student";
-    }
-    if(photoPickEl) photoPickEl._photoHandled = true;
-    pendingPhotoKind = kind;
-    idcardScanAt = 0;
     toast("ছবি পাওয়া গেছে — পড়া হচ্ছে…");
-    applyPickedPhotoUrl(kind, dataUrl);
-    stopPhotoPoll();
-    clearPhotoPickOpen();
+    applyPickedPhotoUrl(kind, url);
   }catch(e){}
-};
-/* Chunked native-bridge delivery (APK v1.0.9): the native side sends the
-   base64 payload in ~16 KB pieces (v1.0.8 sent it in ONE evaluateJavascript
-   call with a ~130-270 KB data-URL string, which this phone's WebView
-   silently dropped — decode succeeded, no failure toast, yet the photo
-   never landed). Chunks are sent in order 0..total-1 and collected by
-   index, so out-of-order arrival still reassembles; a duplicate chunk
-   is ignored; an incomplete set is never applied. A chunk-0 whose
-   content differs from the stored chunk 0 is a NEW pick, so it drops
-   any stale open set and starts over. When all `total` pieces have
-   arrived they are joined and handed to __nativePhotoData, so all
-   its dedup/kind/toast logic is reused unchanged. Never throws. */
-window.__nativePhotoChunk = function(i, total, part){
-  try{
-    if(typeof i !== "number" || typeof total !== "number" || total <= 0 || total > 200 || i < 0 || i >= total) return;
-    if(typeof part !== "string" || !part) return;
-    if(!nativePhotoChunks || nativePhotoTotal !== total){
-      nativePhotoChunks = [];
-      nativePhotoTotal = total;
-      nativePhotoReceived = 0;
-      window.__nativePhotoDone = false; /* new set started */
-    }
-    /* A chunk-0 with DIFFERENT content than the stored chunk 0 is a NEW
-       pick arriving while an older set is still open (same size) — drop
-       the stale set and start over. An identical chunk 0 is just a
-       duplicate of the same pick (falls through to the duplicate guard
-       below). An empty slot 0 is a late chunk 0 of the current pick. */
-    if(i === 0 && nativePhotoChunks[0] !== undefined && nativePhotoChunks[0] !== part){
-      nativePhotoChunks = [];
-      nativePhotoTotal = total;
-      nativePhotoReceived = 0;
-      window.__nativePhotoDone = false; /* new set started */
-    }
-    if(nativePhotoChunks[i] !== undefined) return; /* duplicate chunk */
-    nativePhotoChunks[i] = part;
-    nativePhotoReceived++;
-    if(nativePhotoReceived >= nativePhotoTotal){
-      var b64 = nativePhotoChunks.join("");
-      nativePhotoChunks = null; nativePhotoTotal = 0; nativePhotoReceived = 0;
-      window.__nativePhotoDone = true; /* set complete — native ACK reads this */
-      if(window.__nativePhotoData) window.__nativePhotoData("data:image/jpeg;base64," + b64);
-    }
-  }catch(e){}
-};
-/* Delegated fallback: catches an overlay input that somehow never got
-   its direct listener (see afterRender). Inputs already bound are
-   skipped — their direct listener handles the pick and stops
-   propagation, so a pick is never processed twice. */
-document.addEventListener("change", function(e){
-  var inp=e.target && e.target.closest ? e.target.closest(".photo-input-overlay") : null;
-  if(!inp || inp._photoDirectBound) return;
-  handlePhotoOverlayPick(inp);
-});
+}
+function startPendingPhotoPull(){
+  if(pendingPhotoPullTimer !== null) return;
+  pendingPhotoPullTimer = setInterval(function(){ pullPendingPhoto(); }, 500);
+}
+function stopPendingPhotoPull(){
+  if(pendingPhotoPullTimer !== null){ clearInterval(pendingPhotoPullTimer); pendingPhotoPullTimer = null; }
+  pendingPhotoPullKind = "";
+}
+/* Record the kind of the overlay input the user tapped (data-photo-kind:
+   student / teacher / founder / homework / resultfile / logo). This is
+   ONLY a kind hint for the pull — no render hold, no poller, no timers:
+   the tap itself opens the system chooser through the input, and the
+   photo arrives through the bridge store. If the tap is never recorded
+   the pull falls back to the open-form inference. */
 document.addEventListener("click", function(e){
-  var inp=e.target && e.target.closest ? e.target.closest(".photo-input-overlay") : null;
+  var inp = e.target && e.target.closest ? e.target.closest(".photo-input-overlay") : null;
   if(!inp) return;
-  /* The native picker is about to open: hold sync renders until the pick
-     returns, or the rebuild would destroy this input and swallow the
-     change event. Safety timer clears the hold even if the picker never
-     answers (30 s); window focus below covers a cancelled pick. A new
-     tap cancels any pending focus-release from returning earlier — this
-     pick is live now, so the hold must stay up. */
-  photoPickOpen = true;
-  photoPickKind = inp.getAttribute("data-photo-kind") || "student";
-  photoPickSeq++;
-  if(focusClearTimer !== null){ clearTimeout(focusClearTimer); focusClearTimer = null; }
-  if(photoPickTimer !== null) clearTimeout(photoPickTimer);
-  photoPickTimer = setTimeout(clearPhotoPickOpen, 30000);
-  /* Fallback for a lost change event: poll the tapped input (and any
-     live overlay input) for the picked file while the pick is open. */
-  startPhotoPoll(inp);
-  toast("ছবি বেছে নেওয়া হচ্ছে…");
-});
-/* The user came back from the picker without picking (cancelled): release
-   the render hold so any held sync render runs. Delayed 1.5 s — Blink
-   delivers the picked file's change event in the same return, and
-   clearing immediately would flush a held render and rebuild #app,
-   destroying the overlay input before the change lands (the "gallery
-   opens, photo picked, nothing in the form" bug — the native side was
-   proven correct: req=1001 res=-1 data=true uri=true cb=true). While
-   the 1.5 s runs the hold stays up, so the change lands on the live
-   input first. A cancelled/expired pick just clears 1.5 s late. */
-window.addEventListener("focus", function(){
-  if(!photoPickOpen) return;
-  if(focusClearTimer !== null) clearTimeout(focusClearTimer);
-  focusClearTimer = setTimeout(function(){ focusClearTimer = null; clearPhotoPickOpen(); }, 1500);
+  pendingPhotoPullKind = inp.getAttribute("data-photo-kind") || "student";
 });
 document.addEventListener("click", function(e){
   var b=e.target && e.target.closest ? e.target.closest("[data-photo-camera]") : null;
@@ -9100,6 +8912,11 @@ document.addEventListener("click", function(e){
 document.addEventListener("click", function(e){
   var b=e.target && e.target.closest ? e.target.closest('[data-act="idcard-scan-gallery"]') : null;
   if(!b) return;
+  /* Mark the scan active (like the camera scan button): the native side
+     stores every gallery pick, so the pull must know this one is a card
+     scan and route it to the rotate sheet, never as a profile photo.
+     pullPendingPhoto clears the flag the moment it routes the scan. */
+  idcardScanAt=Date.now();
   ensureIdCardInput();
   idcardInput.click();
 });
