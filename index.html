@@ -926,6 +926,13 @@ var photoPickKind = "student";
 var photoPickSeq = 0;
 var photoPickHandledSeq = -1;
 var nativePhotoLast = {key: "", at: 0};
+/* Chunked native-bridge delivery (APK v1.0.9): the native side sends the
+   base64 payload in ~16 KB pieces — v1.0.8's single-shot evaluateJavascript
+   with a ~130-270 KB data-URL string silently dropped on this phone. The
+   collector is index-based, so out-of-order arrival still reassembles. */
+var nativePhotoChunks = null;
+var nativePhotoTotal = 0;
+var nativePhotoReceived = 0;
 var persistTimer = null;
 var saveTimer = null;
 var sessionPhone = "";
@@ -2168,7 +2175,7 @@ function shareEntryLink(){
    versionCode/versionName here and the notice appears for everyone
    automatically on the next web deploy. */
 var APK_UPDATE_SEEN_KEY = "school-apk-update-seen";
-var LATEST_APK = {versionCode: 9, versionName: "1.0.8", url: DEFAULT_APK_LINK};
+var LATEST_APK = {versionCode: 10, versionName: "1.0.9", url: DEFAULT_APK_LINK};
 function apkUpdateUnseen(){
   try{ return localStorage.getItem(APK_UPDATE_SEEN_KEY) !== LATEST_APK.versionName; }catch(e){ return true; }
 }
@@ -2214,10 +2221,10 @@ function readEntryParam(){
 function appPlatformLine(){
   var v = installedApkVersionCode();
   if(v !== null){
-    if(v === LATEST_APK.versionCode) return '<p class="dim small" style="margin:14px 0 0;text-align:center">📱 অ্যাপ সংস্করণ: v'+LATEST_APK.versionName+' • ওয়েব: ছবি-ঠিক ১১ নভে</p>';
-    return '<p class="dim small" style="margin:14px 0 0;text-align:center">📱 অ্যাপ সংস্করণ কোড: '+bnNum(v)+' • ওয়েব: ছবি-ঠিক ১১ নভে</p>';
+    if(v === LATEST_APK.versionCode) return '<p class="dim small" style="margin:14px 0 0;text-align:center">📱 অ্যাপ সংস্করণ: v'+LATEST_APK.versionName+' • ওয়েব: ছবি-ঠিক ১২ নভে</p>';
+    return '<p class="dim small" style="margin:14px 0 0;text-align:center">📱 অ্যাপ সংস্করণ কোড: '+bnNum(v)+' • ওয়েব: ছবি-ঠিক ১২ নভে</p>';
   }
-  return '<p class="dim small" style="margin:14px 0 0;text-align:center">🌐 ব্রাউজার দিয়ে খোলা হয়েছে — বন্ধ থাকলে অ্যালার্ম বাজবে না • ওয়েব: ছবি-ঠিক ১১ নভে</p>';
+  return '<p class="dim small" style="margin:14px 0 0;text-align:center">🌐 ব্রাউজার দিয়ে খোলা হয়েছে — বন্ধ থাকলে অ্যালার্ম বাজবে না • ওয়েব: ছবি-ঠিক ১২ নভে</p>';
 }
 function markApkUpdateSeen(){
   try{ localStorage.setItem(APK_UPDATE_SEEN_KEY, LATEST_APK.versionName); }catch(e){}
@@ -8955,6 +8962,46 @@ window.__nativePhotoData = function(dataUrl){
     applyPickedPhotoUrl(kind, dataUrl);
     stopPhotoPoll();
     clearPhotoPickOpen();
+  }catch(e){}
+};
+/* Chunked native-bridge delivery (APK v1.0.9): the native side sends the
+   base64 payload in ~16 KB pieces (v1.0.8 sent it in ONE evaluateJavascript
+   call with a ~130-270 KB data-URL string, which this phone's WebView
+   silently dropped — decode succeeded, no failure toast, yet the photo
+   never landed). Chunks are sent in order 0..total-1 and collected by
+   index, so out-of-order arrival still reassembles; a duplicate chunk
+   is ignored; an incomplete set is never applied. A chunk-0 whose
+   content differs from the stored chunk 0 is a NEW pick, so it drops
+   any stale open set and starts over. When all `total` pieces have
+   arrived they are joined and handed to __nativePhotoData, so all
+   its dedup/kind/toast logic is reused unchanged. Never throws. */
+window.__nativePhotoChunk = function(i, total, part){
+  try{
+    if(typeof i !== "number" || typeof total !== "number" || total <= 0 || total > 200 || i < 0 || i >= total) return;
+    if(typeof part !== "string" || !part) return;
+    if(!nativePhotoChunks || nativePhotoTotal !== total){
+      nativePhotoChunks = [];
+      nativePhotoTotal = total;
+      nativePhotoReceived = 0;
+    }
+    /* A chunk-0 with DIFFERENT content than the stored chunk 0 is a NEW
+       pick arriving while an older set is still open (same size) — drop
+       the stale set and start over. An identical chunk 0 is just a
+       duplicate of the same pick (falls through to the duplicate guard
+       below). An empty slot 0 is a late chunk 0 of the current pick. */
+    if(i === 0 && nativePhotoChunks[0] !== undefined && nativePhotoChunks[0] !== part){
+      nativePhotoChunks = [];
+      nativePhotoTotal = total;
+      nativePhotoReceived = 0;
+    }
+    if(nativePhotoChunks[i] !== undefined) return; /* duplicate chunk */
+    nativePhotoChunks[i] = part;
+    nativePhotoReceived++;
+    if(nativePhotoReceived >= nativePhotoTotal){
+      var b64 = nativePhotoChunks.join("");
+      nativePhotoChunks = null; nativePhotoTotal = 0; nativePhotoReceived = 0;
+      if(window.__nativePhotoData) window.__nativePhotoData("data:image/jpeg;base64," + b64);
+    }
   }catch(e){}
 };
 /* Delegated fallback: catches an overlay input that somehow never got
