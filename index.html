@@ -887,10 +887,10 @@ var syncRenderPending = false;
 var pointerDown = false;
 /* Photo pick (render hold): RETAINED ONLY as a flag the shared render
    machinery checks (renderFromSync / flushSyncRender / holdOrRender).
-   It is never set true any more — the v1.0.12 pull model has no
+   It is never set true any more — the madrasa mechanism has no
    picker-open hold, because a sync render can no longer destroy a
-   pick: the native side stores the photo and the page pulls it (see
-   pullPendingPhoto below). */
+   pick: the shared input lives on document.body, outside the
+   re-rendered form. */
 var photoPickOpen = false;
 var persistTimer = null;
 var saveTimer = null;
@@ -2082,7 +2082,7 @@ function shareEntryLink(){
    versionCode/versionName here and the notice appears for everyone
    automatically on the next web deploy. */
 var APK_UPDATE_SEEN_KEY = "school-apk-update-seen";
-var LATEST_APK = {versionCode: 13, versionName: "1.0.12", url: DEFAULT_APK_LINK};
+var LATEST_APK = {versionCode: 14, versionName: "1.0.13", url: DEFAULT_APK_LINK};
 function apkUpdateUnseen(){
   try{ return localStorage.getItem(APK_UPDATE_SEEN_KEY) !== LATEST_APK.versionName; }catch(e){ return true; }
 }
@@ -2128,10 +2128,10 @@ function readEntryParam(){
 function appPlatformLine(){
   var v = installedApkVersionCode();
   if(v !== null){
-    if(v === LATEST_APK.versionCode) return '<p class="dim small" style="margin:14px 0 0;text-align:center">📱 অ্যাপ সংস্করণ: v'+LATEST_APK.versionName+' • ওয়েব: ছবি-ঠিক ১২ নভে</p>';
-    return '<p class="dim small" style="margin:14px 0 0;text-align:center">📱 অ্যাপ সংস্করণ কোড: '+bnNum(v)+' • ওয়েব: ছবি-ঠিক ১২ নভে</p>';
+    if(v === LATEST_APK.versionCode) return '<p class="dim small" style="margin:14px 0 0;text-align:center">📱 অ্যাপ সংস্করণ: v'+LATEST_APK.versionName+' • ওয়েব: ছবি-নতুন ১২ নভে</p>';
+    return '<p class="dim small" style="margin:14px 0 0;text-align:center">📱 অ্যাপ সংস্করণ কোড: '+bnNum(v)+' • ওয়েব: ছবি-নতুন ১২ নভে</p>';
   }
-  return '<p class="dim small" style="margin:14px 0 0;text-align:center">🌐 ব্রাউজার দিয়ে খোলা হয়েছে — বন্ধ থাকলে অ্যালার্ম বাজবে না • ওয়েব: ছবি-ঠিক ১২ নভে</p>';
+  return '<p class="dim small" style="margin:14px 0 0;text-align:center">🌐 ব্রাউজার দিয়ে খোলা হয়েছে — বন্ধ থাকলে অ্যালার্ম বাজবে না • ওয়েব: ছবি-নতুন ১২ নভে</p>';
 }
 function markApkUpdateSeen(){
   try{ localStorage.setItem(APK_UPDATE_SEEN_KEY, LATEST_APK.versionName); }catch(e){}
@@ -6244,8 +6244,7 @@ function homeworkPhotosHtml(){
       }).join("") + '</div>';
   if(photos.length < HOMEWORK_PHOTOS_MAX){
     h += '<div class="row-btns"><button type="button" class="btn ghost small" style="margin:0" data-photo-camera="homework">📷 ছবি যোগ করুন</button>'
-      + '<span style="position:relative;display:inline-block"><button type="button" class="btn ghost small" style="margin:0" data-photo-pick="homework">🖼️ গ্যালারি থেকে</button>'
-      + '<input type="file" accept="image/*" class="photo-input-overlay" data-photo-kind="homework" style="position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;cursor:pointer" aria-label="গ্যালারি থেকে ছবি বেছে নিন" /></span></div>';
+      + '<button type="button" class="btn ghost small" style="margin:0" data-photo-pick="homework">🖼️ গ্যালারি থেকে</button></div>';
   } else {
     h += '<p class="dim small" style="margin:0">সর্বোচ্চ '+bnNum(HOMEWORK_PHOTOS_MAX)+'টি ছবি যোগ করা হয়েছে।</p>';
   }
@@ -7023,26 +7022,21 @@ function adminNoticesHtml(){
   return html;
 }
 
+/* Photo pick — MADRASA mechanism (proven on this phone, 2026-11-12):
+   two plain buttons, NO file input in the form markup at all. The tap
+   on "ছবি বেছে নিন" is caught by the delegated [data-photo-pick]
+   click handler, which records the kind and calls photoInput.click()
+   on ONE shared hidden input (ensurePhotoInput, appended to
+   document.body, outside the re-rendered form). The picked file
+   arrives through that input's change event -> handlePhotoFile.
+   The school's old overlay input (inside the re-rendered form) and
+   the v1.0.12 pull/bridge chain both failed on this phone at the
+   same invisible step; the madrasa's simple path works. */
 function photoPickHtml(kind, current){
-  /* The "ছবি বেছে নিন" button is a REAL file input the user taps DIRECTLY:
-     the transparent input covers ONLY this button (absolute inset-0,
-     opacity 0) inside a relative span, so the tap lands on the input
-     itself — NO programmatic .click() anywhere in this path (a
-     programmatic click opens nothing on the user's phone, WebGL-dead
-     WebView, APK v1.0.5). The 📷 ক্যামেরা button next to it is NOT
-     covered. The tap opens the system chooser (via onShowFileChooser);
-     the picked photo arrives through the bridge store and the page
-     PULLS it (pullPendingPhoto) — the page never depends on this
-     input's change event, which never fires on this phone. A tiny grey
-     line under the buttons (id photoPullDiag) shows the pull's own view
-     of the pull — Android presence, what getPendingPhoto() returned,
-     tick count, last action — so a screenshot reveals the truth. */
   return '<div class="photo-pick" data-photo-kind="'+kind+'">'
     + (safeImg(current) ? '<img src="'+safeImg(current)+'" alt="" />' : '<span class="avatar-fallback" style="width:64px;height:64px;border-radius:12px">'+icon("users")+'</span>')
-    + '<span style="position:relative;display:inline-block"><button type="button" class="btn ghost small" style="margin:0" data-photo-pick="'+kind+'">ছবি বেছে নিন</button>'
-    + '<input type="file" accept="image/*" class="photo-input-overlay" data-photo-kind="'+kind+'" style="position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;cursor:pointer" aria-label="ছবি বেছে নিন" /></span>'
-    + '<button type="button" class="btn ghost small" style="margin:0" data-photo-camera="'+kind+'">📷 ক্যামেরা</button>'
-    + '<div id="photoPullDiag" style="font-size:11px;color:#94a3b8;margin-top:4px">পুল: অপেক্ষা…</div></div>';
+    + '<button type="button" class="btn ghost small" style="margin:0" data-photo-pick="'+kind+'">ছবি বেছে নিন</button>'
+    + '<button type="button" class="btn ghost small" style="margin:0" data-photo-camera="'+kind+'">📷 ক্যামেরা</button></div>';
 }
 
 function adminStudentsHtml(){
@@ -7884,7 +7878,7 @@ function adminSettingsHtml(){
     + '<form data-form="settings">'
     + '<div class="photo-pick">'
     + '<img src="'+(safeImg(ui.pendingLogo || s.logoUrl) || SCHOOL_LOGO)+'" alt="" style="border-radius:999px" />'
-    + '<span style="position:relative;display:inline-block"><button type="button" class="btn ghost small" style="margin:0" data-photo-pick="logo">লোগো বদলান</button><input type="file" accept="image/*" class="photo-input-overlay" data-photo-kind="logo" style="position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;cursor:pointer" aria-label="লোগো বেছে নিন" /></span><button type="button" class="btn ghost small" style="margin:0" data-photo-camera="logo">📷 ক্যামেরা</button></div>'
+    + '<button type="button" class="btn ghost small" style="margin:0" data-photo-pick="logo">লোগো বদলান</button><button type="button" class="btn ghost small" style="margin:0" data-photo-camera="logo">📷 ক্যামেরা</button></div>'
     + '<label class="f"><span>স্কুলের নাম (বাংলা)</span><input type="text" name="nameBn" value="'+esc(s.nameBn)+'" / aria-label="স্কুলের নাম (বাংলা)" /></label>'
     + '<label class="f"><span>নাম (English)</span><input type="text" name="nameEn" value="'+esc(s.nameEn)+'" / aria-label="নাম (English)" /></label>'
     + '<label class="f"><span>স্লোগান / ট্যাগলাইন</span><input type="text" name="tagline" value="'+esc(s.tagline)+'" / aria-label="স্লোগান" /></label>'
@@ -8030,22 +8024,6 @@ function afterRender(){
       else box.innerHTML = '<p class="dim small">লিংকটা অনেক লম্বা, QR বানানো যায়নি।</p>';
     }
   }
-  /* Gallery photo pull (APK v1.0.12): run the 500 ms pull ONLY while a
-     photo form is on screen; stop it the moment the form is gone, so
-     it never polls forever. When no photo form is on screen, also
-     clear any stale photo the native side stored for a non-profile
-     pick (the result-file attach input) — otherwise it would land on
-     the next profile form that opens. The interval itself is a no-op
-     in a plain browser (no window.Android) and while no photo has
-     been picked. */
-  try{
-    var hasPhotoForm = !!document.querySelector('[data-photo-pick="student"], [data-photo-pick="teacher"], [data-photo-pick="founder"], [data-photo-pick="homework"], [data-photo-pick="resultfile"], [data-photo-pick="logo"]');
-    if(hasPhotoForm) startPendingPhotoPull();
-    else {
-      stopPendingPhotoPull();
-      try{ var A2 = window.Android; if(A2 && typeof A2.clearPendingPhoto === "function") A2.clearPendingPhoto(); }catch(e){}
-    }
-  }catch(e){}
 }
 
 /* ================================================================
@@ -8677,30 +8655,25 @@ function fileToDataUrl(file, maxW){
   });
 }
 
-/* ---- Photo picking (robust) ----
-   WHY this exists: the old picker was a hidden <input type="file"> rendered
-   INSIDE #app. Every render() rebuilds #app, so a Firebase sync snapshot
-   arriving while the user was picking a photo destroyed the input element
-   and the change event never reached the app (silent failure). And after a
-   pick, the old code called full render(), wiping everything the admin had
-   already typed in the form. Fix: ONE persistent file input, created once
-   and kept OUTSIDE #app (appended to <body>), with its own direct change
-   listener. Picking updates only the preview image in place - the form and
-   its typed values are never rebuilt.
-   NOTE for the APK: a plain Android WebView also needs a WebChromeClient
-   with onShowFileChooser, or tapping any file input does nothing at all.
-   That lives in the APK's MainActivity.java, not in this HTML file.
-   The input is positioned off-screen (left:-9999px), NOT display:none —
-   a display:none input cannot be opened by a programmatic .click() in
-   some Android WebViews, so the picker silently did nothing. */
+/* ---- Photo picking — MADRASA mechanism (proven on this phone) ----
+   ONE persistent file input, created once and kept OUTSIDE #app
+   (appended to <body>), with its own direct change listener — a
+   render() can never destroy it mid-pick. The input is
+   display:none, exactly like the madrasa's: the madrasa app proves
+   a programmatic .click() opens it on this phone. Picking updates
+   only the preview image in place — the form and its typed values
+   are never rebuilt. NOTE for the APK: the WebView needs a
+   WebChromeClient with onShowFileChooser, and onActivityResult
+   must deliver the result to filePathCallback.onReceiveValue —
+   that lives in the APK's MainActivity.java, not in this file. */
 var photoInput=null, pendingPhotoKind="";
 function ensurePhotoInput(){
   if(photoInput) return photoInput;
   var inp=document.createElement("input");
-  inp.type="file"; inp.accept="image/*"; inp.style.cssText="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;";
+  inp.type="file"; inp.accept="image/*"; inp.style.display="none";
   inp.addEventListener("change", function(){
     var f=inp.files && inp.files[0];
-    if(f){ toast("ছবি পাওয়া গেছে — পড়া হচ্ছে…"); handlePhotoFile(f); }
+    if(f) handlePhotoFile(f);
     try{ inp.value=""; }catch(e){}
   });
   document.body.appendChild(inp);
@@ -8780,9 +8753,9 @@ function handlePhotoFile(file){
 function updatePhotoPreview(kind, url){
   var btn=document.querySelector('[data-photo-pick="'+kind+'"]');
   if(!btn) return;
-  /* The pick button is now wrapped in a relative span (the direct-tap
-     overlay input lives there), so the preview box is the .photo-pick
-     container — NOT the button's parent. */
+  /* The pick button sits directly in the .photo-pick container
+     (madrasa mechanism — two plain buttons, no overlay input), so
+     the preview box is the .photo-pick container. */
   var box=btn.closest ? btn.closest(".photo-pick") : null;
   if(!box) box=btn.parentElement;
   if(!box) return;
@@ -8791,110 +8764,18 @@ function updatePhotoPreview(kind, url){
   var fb=box.querySelector(".avatar-fallback");
   if(fb){ var ni=document.createElement("img"); ni.src=url; ni.alt=""; fb.replaceWith(ni); }
 }
-/* Gallery photo — PULL model (APK v1.0.12). The picked photo is stored
-   by the native side and the PAGE pulls it through the
-   JavascriptInterface (Android.getPendingPhoto). The old push chain
-   (overlay change event → 500 ms poller → native bridge →
-   evaluateJavascript chunks → the old bridge handler) failed on
-   this phone at every step: the change event never fired, the poller
-   found no file, and the pushed chunks never landed. The pull runs
-   only while a photo form is on screen — afterRender() starts/stops
-   it — and stops the moment a photo is applied or the form is left,
-   so it never polls forever. In a plain browser window.Android is
-   undefined and the interval is a harmless no-op; the camera path
-   still works there. pendingPhotoPullKind is the kind of the overlay
-   input last tapped (data-photo-kind); the form inference is the
-   fallback when the tap was never recorded. */
-var pendingPhotoPullTimer = null;
-var pendingPhotoPullKind = "";
-/* Visible pull diagnostic (web-only, display-only): the tiny grey line
-   under the photo buttons (id photoPullDiag in photoPickHtml), updated
-   by the same 500 ms pull interval. It shows the page's own view of
-   the pull so a screenshot reveals the truth: "Android: নেই" = the
-   page cannot see the native bridge at all; "ছবি: নেই" with a rising
-   টিক = the interval runs but the bridge store looks empty; "ছবি:
-   আছে (N অক্ষর)" with no photo in the form = the pull sees the photo
-   but apply is not running; a frozen টিক = the interval itself
-   stopped firing. Never throws, never changes pull behaviour. */
-var photoPullTicks = 0;
-function updatePhotoPullDiag(androidOk, b64Len, lastAction){
-  try{
-    var el = document.getElementById("photoPullDiag");
-    if(!el) return;
-    var a = androidOk ? "Android: আছে" : "Android: নেই";
-    var p = (b64Len > 0) ? ("আছে (" + b64Len + " অক্ষর)") : "নেই";
-    el.textContent = a + " · ছবি: " + p + " · টিক: " + photoPullTicks + " · শেষ: " + lastAction;
-  }catch(e){}
-}
-function photoPullKind(){
-  if(pendingPhotoPullKind) return pendingPhotoPullKind;
-  if(ui && ui.tab === "admin" && ui.adminSection === "teachers") return "teacher";
-  if(ui && ui.tab === "admin" && ui.adminSection === "settings") return "founder";
-  if(ui && ui.tab === "admin" && ui.adminSection === "students") return "student";
-  var b = document.querySelector('[data-photo-pick="teacher"], [data-photo-pick="student"], [data-photo-pick="founder"], [data-photo-pick="homework"], [data-photo-pick="resultfile"], [data-photo-pick="logo"]');
-  if(b) return b.getAttribute("data-photo-pick") || "student";
-  return "student";
-}
-function pullPendingPhoto(){
-  try{
-    photoPullTicks++;
-    var A = window.Android;
-    if(!A || typeof A.getPendingPhoto !== "function"){ updatePhotoPullDiag(false, 0, "Android নেই"); return; }
-    var b64 = A.getPendingPhoto();
-    if(!b64 || typeof b64 !== "string"){ updatePhotoPullDiag(true, 0, "অপেক্ষা"); return; }
-    /* Stale copy guard: a photo stored by a non-profile pick (the
-       result-file attach input) can sit in the bridge store until a
-       profile form opens later. A real pick is pulled within a second
-       of being stored (the interval ticks every 500 ms), so anything
-       older than 60 s is stale — discard it, never apply it. */
-    var at = 0;
-    try{ if(typeof A.getPendingPhotoAt === "function") at = A.getPendingPhotoAt() || 0; }catch(e){}
-    if(at > 0 && (Date.now() - at) > 60000){
-      try{ if(typeof A.clearPendingPhoto === "function") A.clearPendingPhoto(); }catch(e){}
-      updatePhotoPullDiag(true, b64.length, "পুরনো — ফেলে দেওয়া হয়েছে");
-      return;
-    }
-    /* Resolve the kind BEFORE stopping clears the recorded tap kind. */
-    var kind = photoPullKind();
-    /* Clear FIRST so a slow apply can never re-apply the same photo. */
-    try{ if(typeof A.clearPendingPhoto === "function") A.clearPendingPhoto(); }catch(e){}
-    stopPendingPhotoPull();
-    updatePhotoPullDiag(true, b64.length, "পাওয়া গেছে");
-    var url = "data:image/jpeg;base64," + b64;
-    /* ID-card scan active: route to the scan sheet exactly like the
-       file path does (handlePhotoFile's scan branch) — never as a
-       profile photo. */
-    if(typeof idcardScanActive === "function" && idcardScanActive()){
-      idcardScanAt = 0;
-      openIdCardRotateSheet(url);
-      return;
-    }
-    toast("ছবি পাওয়া গেছে — পড়া হচ্ছে…");
-    applyPickedPhotoUrl(kind, url);
-  }catch(e){}
-}
-function startPendingPhotoPull(){
-  if(pendingPhotoPullTimer !== null) return;
-  pendingPhotoPullTimer = setInterval(function(){ pullPendingPhoto(); }, 500);
-  try{
-    var A0 = window.Android;
-    updatePhotoPullDiag(!!(A0 && typeof A0.getPendingPhoto === "function"), 0, "শুরু");
-  }catch(e){}
-}
-function stopPendingPhotoPull(){
-  if(pendingPhotoPullTimer !== null){ clearInterval(pendingPhotoPullTimer); pendingPhotoPullTimer = null; }
-  pendingPhotoPullKind = "";
-}
-/* Record the kind of the overlay input the user tapped (data-photo-kind:
-   student / teacher / founder / homework / resultfile / logo). This is
-   ONLY a kind hint for the pull — no render hold, no poller, no timers:
-   the tap itself opens the system chooser through the input, and the
-   photo arrives through the bridge store. If the tap is never recorded
-   the pull falls back to the open-form inference. */
+/* Gallery pick — MADRASA mechanism: the "ছবি বেছে নিন" button is a
+   plain button (no input in the form). The tap is caught here, the
+   kind is recorded, and the shared hidden input is opened with
+   photoInput.click() — exactly how the madrasa app does it on this
+   phone. The picked file arrives through that input's change event
+   -> handlePhotoFile. */
 document.addEventListener("click", function(e){
-  var inp = e.target && e.target.closest ? e.target.closest(".photo-input-overlay") : null;
-  if(!inp) return;
-  pendingPhotoPullKind = inp.getAttribute("data-photo-kind") || "student";
+  var b=e.target && e.target.closest ? e.target.closest("[data-photo-pick]") : null;
+  if(!b) return;
+  pendingPhotoKind=b.getAttribute("data-photo-pick");
+  ensurePhotoInput();
+  photoInput.click();
 });
 document.addEventListener("click", function(e){
   var b=e.target && e.target.closest ? e.target.closest("[data-photo-camera]") : null;
@@ -8942,10 +8823,9 @@ document.addEventListener("click", function(e){
 document.addEventListener("click", function(e){
   var b=e.target && e.target.closest ? e.target.closest('[data-act="idcard-scan-gallery"]') : null;
   if(!b) return;
-  /* Mark the scan active (like the camera scan button): the native side
-     stores every gallery pick, so the pull must know this one is a card
-     scan and route it to the rotate sheet, never as a profile photo.
-     pullPendingPhoto clears the flag the moment it routes the scan. */
+  /* Mark the scan active (like the camera scan button): handlePhotoFile
+     routes this pick to the rotate sheet instead of saving it as a
+     profile photo, and clears the flag the moment it routes the scan. */
   idcardScanAt=Date.now();
   ensureIdCardInput();
   idcardInput.click();
