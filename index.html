@@ -829,7 +829,7 @@ function defaultData(){
       logoUrl:"", founderName:"", founderTitle:"প্রতিষ্ঠাতা ও প্রধান শিক্ষক", founderBio:"", founderPhoto:"",
       tickerEnabled:false, tickerText:"", shareLink: DEFAULT_SHARE_LINK, apkLink:"", onesignalAppId:"", fcmVapidKey:"", fcmSendUrl:"" },
     classes: CLASSES_DEFAULT.slice(),
-    notices:[], students:[], teachers:[], attendance:{}, results:[], fees:[],
+    notices:[], students:[], teachers:[], attendance:{}, attendanceBy:{}, results:[], fees:[],
     opinions:[], complaints:[], teacherMessages:[], guardianMessages:{}, calls:{}, meetings:[], deletionRequests:[],
     routines:[], homework:[], exams:[], teacherLeaves:[], teacherAttendance:{}, cctvLink:"",
     quizzes:[], quizAttempts:[], azanOffsets:{},
@@ -5912,6 +5912,52 @@ function myChildHtml(){
   return html;
 }
 
+/* ---------------- বিগত হাজিরা (past-attendance history) ----------------
+   The student's own attendance, day by day, newest first — so a student
+   (or a parent using the student's login) can check at any moment how
+   past days went, without flipping the date picker one day at a time.
+   LOCK: only the logged-in student's own children (myChildren()) are
+   ever listed — no other student's name or status appears here.
+   The marker ("কে নিয়েছে") comes from D.attendanceBy, recorded at
+   publish time; days published before this change simply show no marker. */
+function attendanceHistoryHtml(){
+  var kids = myChildren();
+  var keys = Object.keys(D.attendance || {}).sort().reverse();
+  var head = '<h2 class="sec-title" style="font-size:16px">'+icon("calcheck")+' বিগত হাজিরা — প্রতিদিনের হিসাব</h2>';
+  if(!kids.length || !keys.length){
+    return head + '<div class="card empty">এখনো কোনো হাজিরা পাবলিশ হয়নি — শিক্ষক হাজিরা পাবলিশ করলেই এখানে প্রতিদিনের হিসাব দেখা যাবে।</div>';
+  }
+  var out = head + '<p class="dim small" style="margin:0 0 10px">যেকোনো দিনের হাজিরা দেখতে সেদিনের লাইনে চাপ দিন — সেদিনের বিস্তারিত খুলবে।</p>';
+  var any = false;
+  kids.forEach(function(kid){
+    var days = keys.filter(function(k){ return k.split("|")[0] === kid.className; });
+    if(!days.length) return;
+    any = true;
+    var p=0, a=0, l=0, n=0;
+    days.forEach(function(k){
+      var st = (D.attendance[k]||{})[kid.id];
+      if(st==="present") p++; else if(st==="absent") a++; else if(st==="late") l++;
+      if(st) n++;
+    });
+    out += '<section class="card"><h3 style="margin:0 0 4px;font-size:15px">'+esc(kid.name)+' <span class="dim small">— রোল '+esc(bnNum(Number(kid.roll)||kid.roll))+' • '+esc(kid.className)+'</span></h3>'
+      + '<p class="dim small" style="margin:0 0 8px">মোট '+bnNum(days.length)+' দিনের রেকর্ড • উপস্থিত '+bnNum(p)+' • দেরিতে '+bnNum(l)+' • অনুপস্থিত '+bnNum(a)+(days.length>n ? ' • রেকর্ড নেই '+bnNum(days.length-n) : '')+'</p>';
+    out += days.map(function(k){
+      var date = k.split("|")[1] || "";
+      var st = (D.attendance[k]||{})[kid.id];
+      var by = (D.attendanceBy && D.attendanceBy[k] && D.attendanceBy[k].by) || "";
+      return '<div class="person" data-act="att-history-day" data-date="'+esc(date)+'" style="cursor:pointer">'
+        + '<span style="width:30px;height:30px;flex:none;border-radius:999px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center">'+icon("calcheck","sm")+'</span>'
+        + '<span><b>'+esc(fmtDateBn(date))+'</b>'
+        + (by ? '<small>হাজিরা নিয়েছে: '+esc(by)+'</small>' : '')
+        + '</span>'
+        + '<span style="margin-left:auto" class="pill'+(st==="absent"?" urgent":st?" gold":"")+'">'+attLabel(st)+'</span></div>';
+    }).join("");
+    out += '</section>';
+  });
+  if(!any) return head + '<div class="card empty">এখনো কোনো হাজিরা পাবলিশ হয়নি — শিক্ষক হাজিরা পাবলিশ করলেই এখানে প্রতিদিনের হিসাব দেখা যাবে।</div>';
+  return out;
+}
+
 function attendanceHtml(){
   if(!isAdmin() && !isGuardian()){
     return '<h2 class="sec-title">'+icon("calcheck")+' হাজিরা</h2>'
@@ -5967,6 +6013,10 @@ function attendanceHtml(){
       + "<span><b>"+esc(x.name)+"</b><small>রোল: "+esc(bnNum(Number(x.roll)||x.roll))+" • শ্রেণী: "+esc(x.className)+"</small></span>"
       + '<span style="margin-left:auto" class="pill'+(day[x.id]==="absent"?" urgent":day[x.id]?" gold":"")+'">'+attLabel(day[x.id])+"</span></div>";
   }).join("");
+  /* Past-attendance history — the student's own record, day by day.
+     Only for the logged-in student; admins and teachers already check
+     any single day with the date picker above. */
+  if(!isAdmin() && !isTeacher()) html += attendanceHistoryHtml();
   return html;
 }
 
@@ -8453,7 +8503,19 @@ document.addEventListener("click", function(e){
     }
     var rec={}; Object.keys(ui.attMark).forEach(function(k){ if(ui.attMark[k]) rec[k]=ui.attMark[k]; });
     var presentCount=0; Object.keys(rec).forEach(function(k){ if(rec[k]==="present"||rec[k]==="late") presentCount++; });
-    D.attendance[key]=rec; save(); toast(cls+" শ্রেণীর হাজিরা পাবলিশ হয়েছে ("+fmtDateBn(ui.attDate)+") — মোট উপস্থিতি "+bnNum(presentCount)+" জন, সব শিক্ষার্থী এখন দেখতে পাবেন");
+    D.attendance[key]=rec;
+    /* Who took this attendance (for the student's past-attendance history).
+       Kept in a separate map so the published record shape never changes;
+       days published before this change simply have no marker. */
+    if(!D.attendanceBy) D.attendanceBy={};
+    var markerName = isAdmin() ? ((currentAdmin() && currentAdmin().name) || "অ্যাডমিন") : (ui.teacherName || "শিক্ষক");
+    D.attendanceBy[key]={by: markerName};
+    save(); toast(cls+" শ্রেণীর হাজিরা পাবলিশ হয়েছে ("+fmtDateBn(ui.attDate)+") — মোট উপস্থিতি "+bnNum(presentCount)+" জন, সব শিক্ষার্থী এখন দেখতে পাবেন");
+  }
+  else if(act==="att-history-day"){
+    /* Jump from a history row to that day's detail view. */
+    var hd = el.getAttribute("data-date");
+    if(hd){ ui.attDate = hd; ui.attLoadedKey = ""; render(); window.scrollTo(0,0); }
   }
   else if(act==="teacher-att-mark"){
     var tid2=el.getAttribute("data-id"), val2=el.getAttribute("data-val");
