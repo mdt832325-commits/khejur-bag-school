@@ -2145,8 +2145,12 @@ var AZAN_PRAYERS = [["fajr","ফজর"],["dhuhr","যোহর"],["asr","আস
 var AZAN_BN_DIGITS = ["০","১","২","৩","৪","৫","৬","৭","৮","৯"];
 var azanAudio = null, azanAudioFailed = false, azanTimerStarted = false;
 
+/* School azan is OFF by default (owner's decision, 2026-11-17) — a
+   school app should not ring azan on its own. Only an explicit "1"
+   stored by the toggle turns it on for that phone; the madrasa app
+   is unaffected (its own key and default). */
 function azanOn(){
-  try{ return localStorage.getItem(AZAN_ON_KEY)!=="0"; }catch(e){ return true; }
+  try{ return localStorage.getItem(AZAN_ON_KEY)==="1"; }catch(e){ return false; }
 }
 function setAzanOn(on){
   try{ localStorage.setItem(AZAN_ON_KEY, on?"1":"0"); }catch(e){}
